@@ -128,7 +128,7 @@ async function provideSqlCompletions(currentState: import("@codemirror/state").E
     const fullDoc = currentState.doc.toString();
     const completionContext = getSqlCompletionContext(fullDoc, position);
     const shouldLoadTables = completionContext.suggestTables || !!completionContext.qualifier;
-    const tables = shouldLoadTables
+    let tables = shouldLoadTables
       ? await connectionStore.listCompletionTables(
           props.connectionId,
           props.database,
@@ -136,6 +136,22 @@ async function provideSqlCompletions(currentState: import("@codemirror/state").E
           MAX_COMPLETION_TABLES,
         )
       : cachedTables;
+
+    // If qualifier didn't match any table names, try it as a schema name
+    let qualifierIsSchema = false;
+    if (completionContext.qualifier && completionContext.suggestTables && tables.length === 0) {
+      const schemaTables = await connectionStore.listCompletionTables(
+        props.connectionId,
+        props.database,
+        completionContext.prefix,
+        MAX_COMPLETION_TABLES,
+        completionContext.qualifier,
+      );
+      if (schemaTables.length > 0) {
+        tables = schemaTables;
+        qualifierIsSchema = true;
+      }
+    }
 
     // Collect referenced tables — enrich with schema from filtered table lookup
     let refs = completionContext.referencedTables.map((rt) => {
@@ -200,7 +216,11 @@ async function provideSqlCompletions(currentState: import("@codemirror/state").E
       }
     }
 
-    const items = buildSqlCompletionItemsFromContext(completionContext, {
+    const effectiveContext = qualifierIsSchema
+      ? { ...completionContext, qualifier: undefined, suggestTables: true, suggestColumns: false }
+      : completionContext;
+
+    const items = buildSqlCompletionItemsFromContext(effectiveContext, {
       tables,
       columnsByTable,
     });

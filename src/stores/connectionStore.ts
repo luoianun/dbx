@@ -995,9 +995,10 @@ export const useConnectionStore = defineStore("connection", () => {
     database: string,
     filter = "",
     limit?: number,
+    schema?: string,
   ): Promise<SqlCompletionTable[]> {
     const normalizedFilter = filter.trim().toLowerCase();
-    const cacheKey = `${connectionId}:${database}:${normalizedFilter}:${limit ?? ""}`;
+    const cacheKey = `${connectionId}:${database}:${normalizedFilter}:${limit ?? ""}:${schema ?? ""}`;
     if (completionTablesCache.value[cacheKey]) {
       return completionTablesCache.value[cacheKey];
     }
@@ -1005,7 +1006,7 @@ export const useConnectionStore = defineStore("connection", () => {
     await ensureConnected(connectionId);
 
     if (isSchemaAwareDatabase(connectionId)) {
-      const schemas = await api.listSchemas(connectionId, database);
+      const schemas = schema ? [schema] : await api.listSchemas(connectionId, database);
       if (normalizedFilter || limit) {
         const limitedTables: SqlCompletionTable[] = [];
         for (const schema of schemas) {
