@@ -64,6 +64,7 @@ impl AgentDriverClient {
                 "-Dfile.encoding=UTF-8",
                 "-Dsun.stdout.encoding=UTF-8",
                 "-Dsun.stderr.encoding=UTF-8",
+                "-Doracle.net.disableOob=true",
                 "-XX:TieredStopAtLevel=1",
                 "-XX:+UseSerialGC",
                 "-jar",
