@@ -1,6 +1,4 @@
 <div align="center">
-  <p>15 MB 驾驭 30+ 种数据库。桌面端 & Docker 自托管，内置 AI 助手。</p>
-
   <p>
     <img src="https://dl.dbxio.com/assets/readme-hero-20260517.png" alt="DBX 截图" width="820" />
   </p>
