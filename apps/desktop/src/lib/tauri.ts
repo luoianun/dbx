@@ -694,7 +694,10 @@ export async function listJdbcDrivers(): Promise<JdbcDriverInfo[]> {
   return invoke("list_jdbc_drivers");
 }
 
-export async function importJdbcDrivers(paths: string[]): Promise<JdbcDriverInfo[]> {
+export async function importJdbcDrivers(paths: (string | File)[]): Promise<JdbcDriverInfo[]> {
+  if (paths.some((path) => typeof path !== "string")) {
+    throw new Error("Desktop JDBC driver import requires local file paths");
+  }
   return invoke("import_jdbc_drivers", { paths });
 }
 
@@ -710,7 +713,10 @@ export async function installJdbcPlugin(): Promise<JdbcPluginStatus> {
   return invoke("install_jdbc_plugin");
 }
 
-export async function installJdbcPluginLocal(path: string): Promise<JdbcPluginStatus> {
+export async function installJdbcPluginLocal(path: string | File): Promise<JdbcPluginStatus> {
+  if (typeof path !== "string") {
+    throw new Error("Desktop JDBC plugin install requires a local file path");
+  }
   return invoke("install_jdbc_plugin_local", { path });
 }
 
@@ -761,7 +767,10 @@ export async function importAgentsFromZip(path: string | File): Promise<number> 
   return invoke("import_agents_from_zip", { path });
 }
 
-export async function importAgentJar(dbType: string, path: string): Promise<void> {
+export async function importAgentJar(dbType: string, path: string | File): Promise<void> {
+  if (typeof path !== "string") {
+    throw new Error("Desktop driver JAR import requires a local file path");
+  }
   return invoke("import_agent_jar_cmd", { dbType, path });
 }
 

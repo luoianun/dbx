@@ -2,7 +2,7 @@ import { ref, onMounted, onUnmounted } from "vue";
 import { isTauriRuntime } from "@/lib/tauriRuntime";
 import { isMacOS } from "@/lib/platform";
 
-export function shouldReserveMacTrafficLightInset(isMac: boolean, isFullscreen: boolean, isDesktop: boolean): boolean {
+export function shouldReserveMacTrafficLightInset(isMac: boolean, isFullscreen: boolean, isDesktop = true): boolean {
   return isDesktop && isMac && !isFullscreen;
 }
 
