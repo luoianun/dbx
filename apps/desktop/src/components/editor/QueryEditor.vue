@@ -1,17 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, shallowRef, computed } from "vue";
+import { Play, Copy, TextSelect } from "lucide-vue-next";
 import { useI18n } from "vue-i18n";
 import type { CompletionContext } from "@codemirror/autocomplete";
 import type { EditorView as EditorViewType } from "@codemirror/view";
 import { search as cmSearch } from "@codemirror/search";
 import EditorSearchPanel from "./EditorSearchPanel.vue";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+import CustomContextMenu, { type ContextMenuItem } from "@/components/ui/CustomContextMenu.vue";
 import { copyToClipboard } from "@/lib/clipboard";
 import { resolveExecutableSql } from "@/lib/sqlExecutionTarget";
 import { formatSqlText, type SqlFormatDialect } from "@/lib/sqlFormatter";
@@ -333,6 +328,23 @@ function selectAllSqlFromContextMenu() {
   });
   focusEditor();
 }
+
+const contextMenuItems = computed<ContextMenuItem[]>(() => [
+  {
+    label: executeContextMenuLabel.value,
+    action: executeFromContextMenu,
+    disabled: !canExecuteContextSql.value,
+    icon: Play,
+  },
+  { label: "", separator: true },
+  {
+    label: t("editor.contextMenu.copySelection"),
+    action: copySelectedSqlFromContextMenu,
+    disabled: !canCopySelectedSql.value,
+    icon: Copy,
+  },
+  { label: t("editor.contextMenu.selectAll"), action: selectAllSqlFromContextMenu, icon: TextSelect },
+]);
 
 function runKeymapExtension(codeMirrorKeymap: (typeof import("@codemirror/view"))["keymap"]) {
   const shortcuts = settingsStore.editorSettings.shortcuts;
@@ -1514,23 +1526,19 @@ defineExpose({ openSearch, openReplace });
     @gesturechange="onEditorGestureChange"
     @gestureend="onEditorGestureEnd"
   >
-    <ContextMenu>
-      <ContextMenuTrigger as-child>
-        <div ref="editorRef" data-query-editor-root data-context-menu class="h-full w-full overflow-hidden" />
-      </ContextMenuTrigger>
-      <ContextMenuContent class="w-52">
-        <ContextMenuItem :disabled="!canExecuteContextSql" @click="executeFromContextMenu">
-          {{ executeContextMenuLabel }}
-        </ContextMenuItem>
-        <ContextMenuSeparator />
-        <ContextMenuItem :disabled="!canCopySelectedSql" @click="copySelectedSqlFromContextMenu">
-          {{ t("editor.contextMenu.copySelection") }}
-        </ContextMenuItem>
-        <ContextMenuItem @click="selectAllSqlFromContextMenu">
-          {{ t("editor.contextMenu.selectAll") }}
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+    <CustomContextMenu :items="contextMenuItems" v-slot="{ onContextMenu }">
+      <div
+        ref="editorRef"
+        data-query-editor-root
+        class="h-full w-full overflow-hidden"
+        @contextmenu="
+          (e: MouseEvent) => {
+            if (view) syncContextMenuState(view);
+            onContextMenu(e);
+          }
+        "
+      />
+    </CustomContextMenu>
     <EditorSearchPanel ref="searchPanelRef" :view="view" />
   </div>
 </template>
