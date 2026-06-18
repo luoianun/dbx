@@ -366,6 +366,12 @@ export function drawCanvasDataGrid(options: DrawCanvasDataGridOptions) {
           ctx.fillRect(clippedX, y, cellPaintWidth, CANVAS_DATA_GRID_ROW_HEIGHT);
         }
 
+        ctx.strokeStyle = theme.border;
+        ctx.beginPath();
+        ctx.moveTo(clippedX, rowBorderY);
+        ctx.lineTo(Math.min(width, clippedX + cellPaintWidth), rowBorderY);
+        ctx.stroke();
+
         ctx.save();
         ctx.beginPath();
         ctx.rect(clippedX, y, Math.min(cellPaintWidth, width - clippedX), CANVAS_DATA_GRID_ROW_HEIGHT);
