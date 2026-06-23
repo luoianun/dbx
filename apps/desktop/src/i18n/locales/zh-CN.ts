@@ -2465,6 +2465,8 @@ export default {
     wordWrapDescription: "长 SQL 在编辑器宽度内自动折行显示",
     confirmDangerousSqlExecution: "执行危险 SQL 前弹出确认",
     confirmDangerousSqlExecutionDescription: "关闭后，ALTER、DROP、DELETE、TRUNCATE 等危险 SQL 将直接执行。",
+    autoAliasTables: "自动添加表别名",
+    autoAliasTablesDescription: "在 FROM 或 JOIN 中选择表名补全时，自动插入类似 order_items AS oi 的表别名。",
     redisScanPageSize: "Redis 扫描数量",
     redisScanPageSizeDescription: "浏览 Redis Key 时每次 SCAN 请求的 Key 数量。",
     redisScanPageSizeOption: "{count} 个 Key",

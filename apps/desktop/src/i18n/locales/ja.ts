@@ -2395,6 +2395,8 @@ export default {
     wordWrapDescription: "長いSQL行をエディタ幅内で折り返します",
     confirmDangerousSqlExecution: "危険なSQLの前に確認",
     confirmDangerousSqlExecutionDescription: "無効時、ALTER、DROP、DELETE、TRUNCATEなどの危険なSQLが警告ダイアログなしで実行されます。",
+    autoAliasTables: "テーブル別名を自動追加",
+    autoAliasTablesDescription: "FROM または JOIN でテーブル補完を選択すると、order_items AS oi のような生成済み別名を挿入します。",
     redisScanPageSize: "Redisスキャンカウント",
     redisScanPageSizeDescription: "キー参照時のRedis SCANページあたりの要求キー数。",
     redisScanPageSizeOption: "{count}キー",

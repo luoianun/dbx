@@ -2441,6 +2441,8 @@ export default {
     wordWrapDescription: "Wrap long SQL lines within the editor width",
     confirmDangerousSqlExecution: "Confirm before dangerous SQL",
     confirmDangerousSqlExecutionDescription: "When disabled, ALTER, DROP, DELETE, TRUNCATE, and other dangerous SQL run without the warning dialog.",
+    autoAliasTables: "Automatically add table aliases",
+    autoAliasTablesDescription: "When selecting a table completion in FROM or JOIN, insert a generated alias such as order_items AS oi.",
     redisScanPageSize: "Redis scan count",
     redisScanPageSizeDescription: "Keys requested per Redis SCAN page when browsing keys.",
     redisScanPageSizeOption: "{count} keys",

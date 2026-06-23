@@ -2223,6 +2223,8 @@ export default {
     wordWrapDescription: "長 SQL 在編輯器寬度內自動折行顯示",
     confirmDangerousSqlExecution: "執行危險 SQL 前彈出確認",
     confirmDangerousSqlExecutionDescription: "關閉後，ALTER、DROP、DELETE、TRUNCATE 等危險 SQL 會直接執行。",
+    autoAliasTables: "自動加入資料表別名",
+    autoAliasTablesDescription: "在 FROM 或 JOIN 中選擇資料表補全時，自動插入類似 order_items AS oi 的資料表別名。",
     redisScanPageSize: "Redis 掃描數量",
     redisScanPageSizeDescription: "瀏覽 Redis Key 時每次 SCAN 請求的 Key 數量。",
     redisScanPageSizeOption: "{count} 個 Key",

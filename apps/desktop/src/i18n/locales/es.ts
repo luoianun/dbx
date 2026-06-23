@@ -2093,6 +2093,8 @@ export default {
     wordWrapDescription: "Ajustar las líneas largas de SQL al ancho del editor",
     confirmDangerousSqlExecution: "Confirmar antes de SQL peligroso",
     confirmDangerousSqlExecutionDescription: "Cuando se desactiva, ALTER, DROP, DELETE, TRUNCATE y otras sentencias peligrosas se ejecutan sin el diálogo de advertencia.",
+    autoAliasTables: "Agregar alias de tabla automáticamente",
+    autoAliasTablesDescription: "Al seleccionar una tabla en FROM o JOIN, inserta un alias generado como order_items AS oi.",
     redisScanPageSize: "Cantidad de escaneo Redis",
     redisScanPageSizeDescription: "Claves solicitadas por página SCAN al explorar claves Redis.",
     redisScanPageSizeOption: "{count} claves",

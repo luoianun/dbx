@@ -308,6 +308,7 @@ export interface EditorSettings {
   activeCustomThemeId: string;
   executeMode: "all" | "current";
   showExecutionTargetPicker: boolean;
+  autoAliasTables: boolean;
   wordWrap: boolean;
   confirmDangerousSqlExecution: boolean;
   compactTabTitle: boolean;
@@ -407,6 +408,7 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   activeCustomThemeId: "default",
   executeMode: "all",
   showExecutionTargetPicker: false,
+  autoAliasTables: true,
   wordWrap: false,
   confirmDangerousSqlExecution: true,
   compactTabTitle: false,
@@ -571,6 +573,7 @@ export function normalizeEditorSettings(settings: Partial<EditorSettings>, exist
     activeCustomThemeId: settings.activeCustomThemeId ?? "default",
     executeMode: settings.executeMode ?? DEFAULT_EDITOR_SETTINGS.executeMode,
     showExecutionTargetPicker: settings.showExecutionTargetPicker ?? DEFAULT_EDITOR_SETTINGS.showExecutionTargetPicker,
+    autoAliasTables: settings.autoAliasTables ?? DEFAULT_EDITOR_SETTINGS.autoAliasTables,
     wordWrap: settings.wordWrap ?? DEFAULT_EDITOR_SETTINGS.wordWrap,
     confirmDangerousSqlExecution: settings.confirmDangerousSqlExecution ?? DEFAULT_EDITOR_SETTINGS.confirmDangerousSqlExecution,
     compactTabTitle: settings.compactTabTitle ?? DEFAULT_EDITOR_SETTINGS.compactTabTitle,
@@ -730,6 +733,7 @@ export const useSettingsStore = defineStore("settings", () => {
     }
     if (partial.executeMode !== undefined) editorSettings.value.executeMode = partial.executeMode;
     if (partial.showExecutionTargetPicker !== undefined) editorSettings.value.showExecutionTargetPicker = partial.showExecutionTargetPicker;
+    if (partial.autoAliasTables !== undefined) editorSettings.value.autoAliasTables = partial.autoAliasTables;
     if (partial.wordWrap !== undefined) editorSettings.value.wordWrap = partial.wordWrap;
     if (partial.confirmDangerousSqlExecution !== undefined) editorSettings.value.confirmDangerousSqlExecution = partial.confirmDangerousSqlExecution;
     if (partial.compactTabTitle !== undefined) editorSettings.value.compactTabTitle = partial.compactTabTitle;

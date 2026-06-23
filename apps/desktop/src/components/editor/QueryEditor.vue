@@ -1235,6 +1235,7 @@ async function provideSqlCompletions(currentState: import("@codemirror/state").E
         dialect: props.dialect,
         databaseType: props.databaseType,
         keywordCase: settingsStore.editorSettings.sqlFormatter.keywordCase,
+        autoAliasTables: settingsStore.editorSettings.autoAliasTables,
       });
       return buildCompletionResult(items, position - completionContext.prefix.length, getSqlCompletionResultValidFor(fullDoc, position));
     }
@@ -1253,6 +1254,7 @@ async function provideSqlCompletions(currentState: import("@codemirror/state").E
         dialect: props.dialect,
         databaseType: props.databaseType,
         keywordCase: settingsStore.editorSettings.sqlFormatter.keywordCase,
+        autoAliasTables: settingsStore.editorSettings.autoAliasTables,
       });
       return buildCompletionResult(items, position - completionContext.prefix.length, getSqlCompletionResultValidFor(fullDoc, position));
     }
@@ -1397,6 +1399,7 @@ function buildLocalSqlCompletionResult(completionContext: ReturnType<typeof getS
     dialect: props.dialect,
     databaseType: props.databaseType,
     keywordCase: settingsStore.editorSettings.sqlFormatter.keywordCase,
+    autoAliasTables: settingsStore.editorSettings.autoAliasTables,
   });
 
   return buildCompletionResult(items, position - completionContext.prefix.length, getSqlCompletionResultValidFor(fullDoc, position));
@@ -1707,6 +1710,7 @@ async function performAsyncCompletionWithResult(epoch: number, completionContext
     dialect: props.dialect,
     databaseType: props.databaseType,
     keywordCase: settingsStore.editorSettings.sqlFormatter.keywordCase,
+    autoAliasTables: settingsStore.editorSettings.autoAliasTables,
   });
 
   return buildCompletionResult(items, position - completionContext.prefix.length, getSqlCompletionResultValidFor(fullDoc, position));

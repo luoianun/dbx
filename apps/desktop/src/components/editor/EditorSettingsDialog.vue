@@ -103,6 +103,7 @@ const editActiveCustomThemeId = ref(settingsStore.editorSettings.activeCustomThe
 const showThemeCustomizer = ref(false);
 const editExecuteMode = ref(settingsStore.editorSettings.executeMode);
 const editShowExecutionTargetPicker = ref(settingsStore.editorSettings.showExecutionTargetPicker);
+const editAutoAliasTables = ref(settingsStore.editorSettings.autoAliasTables);
 const editWordWrap = ref(settingsStore.editorSettings.wordWrap);
 const editConfirmDangerousSqlExecution = ref(settingsStore.editorSettings.confirmDangerousSqlExecution);
 const editAppLayout = ref(settingsStore.editorSettings.appLayout);
@@ -365,6 +366,7 @@ watch(
       editActiveCustomThemeId.value = settingsStore.editorSettings.activeCustomThemeId;
       editExecuteMode.value = settingsStore.editorSettings.executeMode;
       editShowExecutionTargetPicker.value = settingsStore.editorSettings.showExecutionTargetPicker;
+      editAutoAliasTables.value = settingsStore.editorSettings.autoAliasTables;
       editWordWrap.value = settingsStore.editorSettings.wordWrap;
       editConfirmDangerousSqlExecution.value = settingsStore.editorSettings.confirmDangerousSqlExecution;
       editAppLayout.value = settingsStore.editorSettings.appLayout;
@@ -423,6 +425,7 @@ function hasChanges(): boolean {
     editActiveCustomThemeId.value !== settingsStore.editorSettings.activeCustomThemeId ||
     editExecuteMode.value !== settingsStore.editorSettings.executeMode ||
     editShowExecutionTargetPicker.value !== settingsStore.editorSettings.showExecutionTargetPicker ||
+    editAutoAliasTables.value !== settingsStore.editorSettings.autoAliasTables ||
     editWordWrap.value !== settingsStore.editorSettings.wordWrap ||
     editConfirmDangerousSqlExecution.value !== settingsStore.editorSettings.confirmDangerousSqlExecution ||
     editAppLayout.value !== settingsStore.editorSettings.appLayout ||
@@ -466,6 +469,7 @@ async function persistSettings() {
     activeCustomThemeId: editActiveCustomThemeId.value,
     executeMode: editExecuteMode.value,
     showExecutionTargetPicker: editShowExecutionTargetPicker.value,
+    autoAliasTables: editAutoAliasTables.value,
     wordWrap: editWordWrap.value,
     confirmDangerousSqlExecution: editConfirmDangerousSqlExecution.value,
     appLayout: editAppLayout.value,
@@ -519,6 +523,7 @@ function resetDefaultsForTab(tab: SettingsCategory) {
     editFontSize.value = DEFAULT_EDITOR_SETTINGS.fontSize;
     editExecuteMode.value = DEFAULT_EDITOR_SETTINGS.executeMode;
     editShowExecutionTargetPicker.value = DEFAULT_EDITOR_SETTINGS.showExecutionTargetPicker;
+    editAutoAliasTables.value = DEFAULT_EDITOR_SETTINGS.autoAliasTables;
     editWordWrap.value = DEFAULT_EDITOR_SETTINGS.wordWrap;
     editConfirmDangerousSqlExecution.value = DEFAULT_EDITOR_SETTINGS.confirmDangerousSqlExecution;
   } else if (tab === "formatter") {
@@ -572,6 +577,7 @@ function resetAllDefaults() {
   editActiveCustomThemeId.value = DEFAULT_EDITOR_SETTINGS.activeCustomThemeId;
   editExecuteMode.value = DEFAULT_EDITOR_SETTINGS.executeMode;
   editShowExecutionTargetPicker.value = DEFAULT_EDITOR_SETTINGS.showExecutionTargetPicker;
+  editAutoAliasTables.value = DEFAULT_EDITOR_SETTINGS.autoAliasTables;
   editWordWrap.value = DEFAULT_EDITOR_SETTINGS.wordWrap;
   editConfirmDangerousSqlExecution.value = DEFAULT_EDITOR_SETTINGS.confirmDangerousSqlExecution;
   editAppLayout.value = DEFAULT_EDITOR_SETTINGS.appLayout;
@@ -1696,6 +1702,14 @@ watch(
                     <p class="text-xs text-muted-foreground">{{ t("settings.wordWrapDescription") }}</p>
                   </div>
                   <Switch id="editor-word-wrap" v-model="editWordWrap" class="mt-0.5" />
+                </div>
+
+                <div class="flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2">
+                  <div class="space-y-1">
+                    <Label for="editor-auto-alias-tables">{{ t("settings.autoAliasTables") }}</Label>
+                    <p class="text-xs text-muted-foreground">{{ t("settings.autoAliasTablesDescription") }}</p>
+                  </div>
+                  <Switch id="editor-auto-alias-tables" v-model="editAutoAliasTables" class="mt-0.5" />
                 </div>
               </div>
 
