@@ -122,8 +122,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import LightTooltip from "@/components/ui/LightTooltip.vue";
 import { flattenTree } from "@/composables/useFlatTree";
+import { createDatabaseCollationOptionsForCharset, fallbackCreateDatabaseCharsetMetadata, nextCreateDatabaseCollation, normalizeCreateDatabaseCharset, parseCreateDatabaseCharsetMetadata } from "@/lib/createDatabaseCharsetOptions";
 
 const { t } = useI18n();
 const labelRef = ref<HTMLElement>();
@@ -1356,6 +1358,10 @@ const showCreateDatabaseDialog = ref(false);
 const createDatabaseName = ref("");
 const createDatabaseCharset = ref("utf8mb4");
 const createDatabaseCollation = ref("utf8mb4_unicode_ci");
+const fallbackCreateDatabaseCharset = fallbackCreateDatabaseCharsetMetadata();
+const createDatabaseCharsetOptions = ref<string[]>(fallbackCreateDatabaseCharset.charsets);
+const createDatabaseCollationsByCharset = ref<Record<string, string[]>>(fallbackCreateDatabaseCharset.collationsByCharset);
+const createDatabaseCharsetLoading = ref(false);
 const showDropDatabaseConfirm = ref(false);
 const dropDatabaseLoading = ref(false);
 const showDropMongoCollectionConfirm = ref(false);
@@ -1982,7 +1988,40 @@ function openCreateDatabaseDialog() {
   createDatabaseName.value = "";
   createDatabaseCharset.value = "utf8mb4";
   createDatabaseCollation.value = "utf8mb4_unicode_ci";
+  createDatabaseCharsetOptions.value = fallbackCreateDatabaseCharset.charsets;
+  createDatabaseCollationsByCharset.value = fallbackCreateDatabaseCharset.collationsByCharset;
   showCreateDatabaseDialog.value = true;
+  void loadCreateDatabaseCharsetMetadata();
+}
+
+function updateCreateDatabaseCharset(value: string) {
+  const previousCharset = createDatabaseCharset.value;
+  createDatabaseCharset.value = value;
+  createDatabaseCollation.value = nextCreateDatabaseCollation(value, previousCharset, createDatabaseCollation.value, createDatabaseCollationsByCharset.value);
+}
+
+async function loadCreateDatabaseCharsetMetadata() {
+  const node = props.node;
+  if (!node.connectionId || createDatabaseCharsetLoading.value) return;
+  createDatabaseCharsetLoading.value = true;
+  try {
+    await connectionStore.ensureConnected(node.connectionId);
+    const [charsetResult, collationResult] = await Promise.all([api.executeQuery(node.connectionId, "", "SHOW CHARACTER SET", undefined, undefined, { maxRows: 1000 }), api.executeQuery(node.connectionId, "", "SHOW COLLATION", undefined, undefined, { maxRows: 10000 })]);
+    if (!showCreateDatabaseDialog.value) return;
+    const metadata = parseCreateDatabaseCharsetMetadata(charsetResult, collationResult);
+    createDatabaseCharsetOptions.value = metadata.charsets;
+    createDatabaseCollationsByCharset.value = metadata.collationsByCharset;
+    if (!createDatabaseCharsetOptions.value.includes(createDatabaseCharset.value) && createDatabaseCharsetOptions.value.length) {
+      updateCreateDatabaseCharset(createDatabaseCharsetOptions.value[0]);
+    } else {
+      createDatabaseCollation.value = nextCreateDatabaseCollation(createDatabaseCharset.value, createDatabaseCharset.value, createDatabaseCollation.value, createDatabaseCollationsByCharset.value);
+    }
+  } catch {
+    createDatabaseCharsetOptions.value = fallbackCreateDatabaseCharset.charsets;
+    createDatabaseCollationsByCharset.value = fallbackCreateDatabaseCharset.collationsByCharset;
+  } finally {
+    createDatabaseCharsetLoading.value = false;
+  }
 }
 
 function ensureDuckDbFileExtension(path: string): string {
@@ -3903,11 +3942,46 @@ function treeItemMenuItems(): ContextMenuItem[] {
       <div v-if="canSetCreateDatabaseCharset" class="grid gap-2">
         <div class="grid gap-1.5">
           <label class="text-xs font-medium text-muted-foreground">{{ t("contextMenu.createDatabaseCharset") }}</label>
-          <Input v-model="createDatabaseCharset" :placeholder="t('contextMenu.createDatabaseCharsetPlaceholder')" @keydown.enter.prevent="confirmCreateDatabase" />
+          <SearchableSelect
+            :model-value="createDatabaseCharset"
+            :options="createDatabaseCharsetOptions"
+            :placeholder="t('contextMenu.createDatabaseCharsetPlaceholder')"
+            :search-placeholder="t('contextMenu.createDatabaseCharsetSearchPlaceholder')"
+            :empty-text="t('contextMenu.createDatabaseCharsetEmpty')"
+            :loading-text="t('contextMenu.createDatabaseCharsetLoading')"
+            :loading="createDatabaseCharsetLoading"
+            :normalize-custom="normalizeCreateDatabaseCharset"
+            allow-custom
+            trigger-variant="outline"
+            trigger-class="h-9 w-full max-w-none justify-between border bg-background px-3 text-sm shadow-xs hover:bg-accent"
+            content-class="w-[var(--reka-popover-trigger-width)]"
+            @update:model-value="updateCreateDatabaseCharset"
+          >
+            <template #custom-option-label="{ value }">
+              <span class="truncate">{{ t("contextMenu.createDatabaseCharsetCustomOption", { value }) }}</span>
+            </template>
+          </SearchableSelect>
         </div>
         <div class="grid gap-1.5">
           <label class="text-xs font-medium text-muted-foreground">{{ t("contextMenu.createDatabaseCollation") }}</label>
-          <Input v-model="createDatabaseCollation" :placeholder="t('contextMenu.createDatabaseCollationPlaceholder')" @keydown.enter.prevent="confirmCreateDatabase" />
+          <SearchableSelect
+            v-model="createDatabaseCollation"
+            :options="createDatabaseCollationOptionsForCharset(createDatabaseCharset, createDatabaseCollationsByCharset)"
+            :placeholder="t('contextMenu.createDatabaseCollationPlaceholder')"
+            :search-placeholder="t('contextMenu.createDatabaseCollationSearchPlaceholder')"
+            :empty-text="t('contextMenu.createDatabaseCollationEmpty')"
+            :loading-text="t('contextMenu.createDatabaseCollationLoading')"
+            :loading="createDatabaseCharsetLoading"
+            :normalize-custom="normalizeCreateDatabaseCharset"
+            allow-custom
+            trigger-variant="outline"
+            trigger-class="h-9 w-full max-w-none justify-between border bg-background px-3 text-sm shadow-xs hover:bg-accent"
+            content-class="w-[var(--reka-popover-trigger-width)]"
+          >
+            <template #custom-option-label="{ value }">
+              <span class="truncate">{{ t("contextMenu.createDatabaseCollationCustomOption", { value }) }}</span>
+            </template>
+          </SearchableSelect>
         </div>
       </div>
       <DialogFooter>

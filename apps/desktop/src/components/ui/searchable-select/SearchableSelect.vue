@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import type { HTMLAttributes } from "vue";
 import { Check, ChevronDown, Search } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
+import type { ButtonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { filterDatabaseOptions } from "@/lib/databaseOptionSearch";
@@ -18,6 +19,7 @@ const props = withDefaults(
     loadingText: string;
     loading?: boolean;
     allowCustom?: boolean;
+    triggerVariant?: ButtonVariants["variant"];
     triggerClass?: HTMLAttributes["class"];
     contentClass?: HTMLAttributes["class"];
     itemClass?: HTMLAttributes["class"];
@@ -27,6 +29,7 @@ const props = withDefaults(
   {
     loading: false,
     allowCustom: false,
+    triggerVariant: "ghost",
     displayName: (option: string) => option,
     normalizeCustom: (value: string) => value,
   },
@@ -139,7 +142,7 @@ function handleKeydown(event: KeyboardEvent) {
 <template>
   <Popover v-model:open="open">
     <PopoverTrigger as-child>
-      <Button type="button" variant="ghost" :title="selectedLabel" :class="cn('h-6 w-auto max-w-56 justify-between gap-1 border-0 bg-transparent px-1 text-xs font-normal shadow-none hover:bg-muted/50 focus-visible:ring-0', triggerClass)">
+      <Button type="button" :variant="triggerVariant" :title="selectedLabel" :class="cn('h-6 w-auto max-w-56 justify-between gap-1 border-0 bg-transparent px-1 text-xs font-normal shadow-none hover:bg-muted/50 focus-visible:ring-0', triggerClass)">
         <slot name="trigger-label" :value="modelValue" :label="selectedLabel" :loading="loading">
           <span class="truncate">{{ loading ? loadingText : selectedLabel }}</span>
         </slot>
