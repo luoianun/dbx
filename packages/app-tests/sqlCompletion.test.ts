@@ -1300,6 +1300,19 @@ test("table alias suggestions avoid reserved words", () => {
   assert.equal(aliasItem!.apply, "AS ord ");
 });
 
+test("automatic table aliases avoid reserved words", () => {
+  const items = buildSqlCompletionItems("select * from ord", "select * from ord".length, {
+    tables,
+    columnsByTable,
+    autoAliasTables: true,
+  });
+
+  const tableItem = items.find((item) => item.type === "table" && item.label === "orders");
+  assert.ok(tableItem);
+  assert.notEqual(tableItem!.apply, "orders AS or");
+  assert.equal(tableItem!.apply, "orders AS ord");
+});
+
 test("table alias suggestions avoid existing aliases", () => {
   const items = buildSqlCompletionItems("select * from customer_orders co join customer_orders ", "select * from customer_orders co join customer_orders ".length, {
     tables: [...tables, { name: "customer_orders", schema: "public", type: "table" }],

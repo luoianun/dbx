@@ -2329,7 +2329,7 @@ function buildTableItems(prefix: string, tables: SqlCompletionTable[], dialect?:
     .filter((table) => matchesPrefix(table.name, prefix))
     .map((table) => {
       const applyName = quoteSqlIdentifier(table.name, dialect);
-      const alias = autoAliasTables ? generateAlias(table.name, existingAliases) : "";
+      const alias = autoAliasTables ? generateTableCompletionAlias(table.name, existingAliases) : "";
       return {
         label: table.name,
         type: "table" as const,
@@ -2636,6 +2636,36 @@ function buildAliasItems(context: SqlCompletionContext): SqlCompletionItem[] {
 }
 
 function generateAlias(tableName: string, existing = new Set<string>()): string {
+  const candidates = buildAliasCandidates(tableName);
+
+  for (const candidate of candidates.filter(Boolean)) {
+    if (!aliasConflicts(candidate, existing)) return candidate;
+  }
+
+  const fallback = candidates.find(Boolean) ?? "tb";
+  for (let index = 2; index < 100; index++) {
+    const candidate = `${fallback}${index}`;
+    if (!aliasConflicts(candidate, existing)) return candidate;
+  }
+  return fallback;
+}
+
+function generateTableCompletionAlias(tableName: string, existing = new Set<string>()): string {
+  const candidates = buildAliasCandidates(tableName);
+
+  for (const candidate of candidates.filter(Boolean)) {
+    if (SQL_ALIAS_RESERVED_WORDS.has(candidate.toLowerCase())) continue;
+    if (!existing.has(candidate.toLowerCase())) return candidate;
+    for (let index = 2; index < 100; index++) {
+      const numbered = `${candidate}${index}`;
+      if (!aliasConflicts(numbered, existing)) return numbered;
+    }
+  }
+
+  return generateAlias(tableName, existing);
+}
+
+function buildAliasCandidates(tableName: string): string[] {
   const parts = identifierWords(tableName);
   const candidates: string[] = [];
 
@@ -2655,20 +2685,7 @@ function generateAlias(tableName: string, existing = new Set<string>()): string 
     if (chars.length >= 3) candidates.push(chars.slice(0, 3).join(""));
   }
 
-  for (const candidate of candidates.filter(Boolean)) {
-    if (!aliasConflicts(candidate, existing)) return candidate;
-    for (let index = 2; index < 100; index++) {
-      const numbered = `${candidate}${index}`;
-      if (!aliasConflicts(numbered, existing)) return numbered;
-    }
-  }
-
-  const fallback = candidates.find(Boolean) ?? "tb";
-  for (let index = 2; index < 100; index++) {
-    const candidate = `${fallback}${index}`;
-    if (!aliasConflicts(candidate, existing)) return candidate;
-  }
-  return fallback;
+  return candidates;
 }
 
 function aliasConflicts(candidate: string, existing: Set<string>): boolean {
