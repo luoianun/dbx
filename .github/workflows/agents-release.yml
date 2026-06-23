@@ -45,6 +45,12 @@ jobs:
           fi
           echo "Comparing $PREV_TAG..HEAD"
 
+          if [ "$SKIP_BUMP" != "true" ] && ! git diff --quiet "$PREV_TAG"..HEAD -- agents/versions.json 2>/dev/null; then
+            echo "Manual agents/versions.json bump detected; using it as the release version source."
+            PREV_VERSIONS=$(git show "$PREV_TAG:agents/versions.json")
+            SKIP_BUMP=true
+          fi
+
           CHANGED=false
 
           if [ "$SKIP_BUMP" = "true" ]; then
