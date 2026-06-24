@@ -3363,7 +3363,7 @@ where
         });
 
         let rewritten_source = match object.object_type {
-            db::ObjectSourceKind::View => object.source.clone(),
+            db::ObjectSourceKind::View | db::ObjectSourceKind::MaterializedView => object.source.clone(),
             db::ObjectSourceKind::Procedure | db::ObjectSourceKind::Function => {
                 rewrite_postgres_routine_schema(&object.source, &request.target_schema)
                     .unwrap_or_else(|| object.source.clone())

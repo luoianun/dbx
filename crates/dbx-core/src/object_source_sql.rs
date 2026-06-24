@@ -256,6 +256,7 @@ fn is_oracle_like(database_type: DatabaseType) -> bool {
 fn object_type_keyword(object_type: &ObjectSourceKind) -> &'static str {
     match object_type {
         ObjectSourceKind::View => "VIEW",
+        ObjectSourceKind::MaterializedView => "MATERIALIZED_VIEW",
         ObjectSourceKind::Procedure => "PROCEDURE",
         ObjectSourceKind::Function => "FUNCTION",
         ObjectSourceKind::Sequence => "SEQUENCE",

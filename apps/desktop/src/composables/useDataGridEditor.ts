@@ -9,6 +9,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { useHistoryStore } from "@/stores/historyStore";
 import type { ColumnInfo, DatabaseType } from "@/types/database";
 import { DBX_NEO4J_ELEMENT_ID_COLUMN, DBX_ROWID_COLUMN } from "@/lib/tableEditing";
+import { effectiveDatabaseTypeForConnection } from "@/lib/jdbcDialect";
 
 interface RowItem {
   id: number;
@@ -174,6 +175,7 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
   const deletedRowCount = computed(() => deletedRows.value.size);
   const pendingChangeCount = computed(() => dirtyRowCount.value + newRowCount.value + deletedRowCount.value);
   const hasPendingChanges = computed(() => pendingChangeCount.value > 0);
+  const resolvedDatabaseType = computed(() => databaseType.value ?? effectiveDatabaseTypeForConnection(connectionStore.getConfig(connectionId.value ?? "")));
 
   // --- Transaction state ---
   const transactionActive = ref(false);
@@ -181,7 +183,7 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
   const saveError = ref("");
 
   const hasBackendSaveTarget = computed(() => !!connectionId.value && !!tableMeta.value);
-  const useTransaction = computed(() => editable.value && supportsDataGridTransaction(databaseType.value) && (!!customSaveHandler?.value || hasBackendSaveTarget.value));
+  const useTransaction = computed(() => editable.value && supportsDataGridTransaction(resolvedDatabaseType.value) && (!!customSaveHandler?.value || hasBackendSaveTarget.value));
 
   if (hasPendingChanges.value && useTransaction.value) {
     transactionActive.value = true;
@@ -360,7 +362,7 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
     return coerceDataGridCellValue({
       value,
       oldValue,
-      databaseType: databaseType.value,
+      databaseType: resolvedDatabaseType.value,
       columnInfo: tableColumnForGridColumn(columnIndex),
     }) as CellValue;
   }
@@ -396,7 +398,7 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
     const val = item?.data[colIdx] ?? null;
     editValue.value = dataGridCellEditorText({
       value: val,
-      databaseType: databaseType.value,
+      databaseType: resolvedDatabaseType.value,
       columnInfo: tableColumnForGridColumn(colIdx),
     });
     focusEditInput();
@@ -544,8 +546,8 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
   }
 
   function shouldClearClonedColumn(columnName: string, columnInfo: ColumnInfo | undefined): boolean {
-    if (databaseType.value === "oracle" && columnName.toUpperCase() === DBX_ROWID_COLUMN) return true;
-    if (databaseType.value === "neo4j" && columnName === DBX_NEO4J_ELEMENT_ID_COLUMN) return true;
+    if (resolvedDatabaseType.value === "oracle" && columnName.toUpperCase() === DBX_ROWID_COLUMN) return true;
+    if (resolvedDatabaseType.value === "neo4j" && columnName === DBX_NEO4J_ELEMENT_ID_COLUMN) return true;
     const extra = columnInfo?.extra ?? "";
     const columnDefault = columnInfo?.column_default ?? "";
     return /\b(auto_increment|autoincrement|identity|generated)\b/i.test(extra) || /\bnextval\s*\(/i.test(columnDefault);
@@ -656,7 +658,7 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
   function saveStatementOptions() {
     if (!tableMeta.value) return null;
     return {
-      databaseType: databaseType.value,
+      databaseType: resolvedDatabaseType.value,
       tableMeta: tableMeta.value,
       columns: result.value.columns,
       sourceColumns: sourceColumns.value,
@@ -709,7 +711,7 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
   }
 
   async function recordFailedDataGridHistory(statements: string[], rollbackStatements: string[], start: number, error: unknown) {
-    const message = normalizeDataGridSaveError(databaseType.value, error);
+    const message = normalizeDataGridSaveError(resolvedDatabaseType.value, error);
     try {
       await recordDataGridHistory(statements, rollbackStatements, Date.now() - start, {
         success: false,
@@ -740,7 +742,7 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
           rows: result.value.rows,
         });
       } catch (e: any) {
-        saveError.value = normalizeDataGridSaveError(databaseType.value, e);
+        saveError.value = normalizeDataGridSaveError(resolvedDatabaseType.value, e);
         isSaving.value = false;
         return;
       }
@@ -762,7 +764,7 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
       try {
         preparedSave = await api.prepareDataGridSave(stmtOptions);
       } catch (e: any) {
-        saveError.value = normalizeDataGridSaveError(databaseType.value, e);
+        saveError.value = normalizeDataGridSaveError(resolvedDatabaseType.value, e);
         isSaving.value = false;
         return;
       }
@@ -783,6 +785,7 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
     let apiResult: { affected_rows?: number } | undefined;
     console.info("[DBX][dataGrid:save-statements]", {
       databaseType: databaseType.value,
+      resolvedDatabaseType: resolvedDatabaseType.value,
       table: tableMeta.value ? [tableMeta.value.schema, tableMeta.value.tableName].filter(Boolean).join(".") : undefined,
       statements: stmts,
       rollbackStatements: rollbackStmts,
@@ -950,7 +953,7 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
       previewStatements.value = stmts;
       return stmts;
     } catch (e: any) {
-      saveError.value = normalizeDataGridSaveError(databaseType.value, e);
+      saveError.value = normalizeDataGridSaveError(resolvedDatabaseType.value, e);
       return [];
     } finally {
       isPreviewLoading.value = false;

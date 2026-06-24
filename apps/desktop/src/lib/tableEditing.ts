@@ -83,3 +83,10 @@ export function isTdengineExistingRowReadonlyColumn(databaseType: DatabaseType |
   const columnInfo = columns.find((info) => info.name.toLowerCase() === column.toLowerCase());
   return !!columnInfo?.is_primary_key || /\btag\b/i.test(columnInfo?.extra ?? "");
 }
+
+export function isClickHouseExistingRowReadonlyColumn(databaseType: DatabaseType | undefined, column: string, primaryKeys: readonly string[], columns: ColumnInfo[] = []): boolean {
+  if (databaseType !== "clickhouse") return false;
+  if (primaryKeys.some((key) => key.toLowerCase() === column.toLowerCase())) return true;
+  const columnInfo = columns.find((info) => info.name.toLowerCase() === column.toLowerCase());
+  return /\bpartition_key\b/i.test(columnInfo?.extra ?? "");
+}

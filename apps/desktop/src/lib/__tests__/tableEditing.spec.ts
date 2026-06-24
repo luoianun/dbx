@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DBX_ROWID_COLUMN, canUseKeylessRowPredicate, editablePrimaryKeys, editableRowIdentifierColumns, isTableDataEditable } from "@/lib/tableEditing";
+import { DBX_ROWID_COLUMN, canEditExistingTableRows, canUseKeylessRowPredicate, editablePrimaryKeys, editableRowIdentifierColumns, isClickHouseExistingRowReadonlyColumn, isTableDataEditable, supportsDataGridTransaction } from "@/lib/tableEditing";
 import type { ColumnInfo, IndexInfo } from "@/types/database";
 
 function column(name: string, isPrimaryKey = false): ColumnInfo {
@@ -44,5 +44,20 @@ describe("tableEditing", () => {
     expect(editableRowIdentifierColumns("postgres", [column("email"), column("name")], [index(["email", "name"]), index(["email"])])).toEqual(["email"]);
     expect(editableRowIdentifierColumns("postgres", [column("email"), column("name")], [index(["email"], true, "email IS NOT NULL")])).toEqual([]);
     expect(editableRowIdentifierColumns("postgres", [column("id", true), column("email")], [index(["email"])])).toEqual(["id"]);
+  });
+
+  it("allows ClickHouse table editing when row identifiers are available", () => {
+    expect(isTableDataEditable("clickhouse", ["id"], "BASE TABLE")).toBe(true);
+    expect(canEditExistingTableRows("clickhouse", undefined, ["id"])).toBe(true);
+    expect(supportsDataGridTransaction("clickhouse")).toBe(false);
+    expect(isTableDataEditable("clickhouse", [], "BASE TABLE")).toBe(true);
+    expect(canEditExistingTableRows("clickhouse", undefined, [])).toBe(false);
+  });
+
+  it("treats ClickHouse row identifier cells as readonly on existing rows", () => {
+    expect(isClickHouseExistingRowReadonlyColumn("clickhouse", "ID", ["id"])).toBe(true);
+    expect(isClickHouseExistingRowReadonlyColumn("clickhouse", "name", ["id"])).toBe(false);
+    expect(isClickHouseExistingRowReadonlyColumn("clickhouse", "event_date", ["id"], [{ ...column("event_date"), extra: "partition_key" }])).toBe(true);
+    expect(isClickHouseExistingRowReadonlyColumn("postgres", "id", ["id"])).toBe(false);
   });
 });

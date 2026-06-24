@@ -80,6 +80,8 @@ pub enum PoolKind {
     /// Message queue admin connection (not a data query pool; serves as a
     /// marker that this connection_id is a valid MQ admin connection).
     MessageQueue,
+    /// Nacos admin connection marker.
+    Nacos,
 }
 
 macro_rules! agent_connection_pool_database_type {
@@ -124,6 +126,7 @@ pub struct AppState {
     pub connections: Arc<RwLock<HashMap<String, PoolKind>>>,
     keepalive_tasks: Arc<RwLock<HashMap<String, JoinHandle<()>>>>,
     pool_activity: Arc<RwLock<HashMap<String, PoolActivity>>>,
+    connection_attempts: RwLock<HashMap<String, u64>>,
     pub configs: RwLock<HashMap<String, ConnectionConfig>>,
     pub running_queries: RunningQueries,
     pub tunnels: TunnelManager,
@@ -131,6 +134,7 @@ pub struct AppState {
     pub storage: Storage,
     pub plugins: PluginRegistry,
     pub agent_manager: crate::agent_manager::AgentManager,
+    pub nacos_registry: crate::nacos::NacosAdminRegistry,
     #[cfg(feature = "mq-admin")]
     pub mq_registry: crate::mq::MqAdminRegistry,
 }
@@ -348,6 +352,7 @@ impl AppState {
             connections: Arc::new(RwLock::new(HashMap::new())),
             keepalive_tasks: Arc::new(RwLock::new(HashMap::new())),
             pool_activity: Arc::new(RwLock::new(HashMap::new())),
+            connection_attempts: RwLock::new(HashMap::new()),
             configs: RwLock::new(HashMap::new()),
             running_queries: RunningQueries::default(),
             tunnels: TunnelManager::new(),
@@ -358,6 +363,7 @@ impl AppState {
                 agent_dir,
                 app_version,
             ),
+            nacos_registry: crate::nacos::NacosAdminRegistry::new(),
             #[cfg(feature = "mq-admin")]
             mq_registry: crate::mq::MqAdminRegistry::new(),
         }
@@ -417,6 +423,48 @@ impl AppState {
         if let Some(pool) = previous {
             close_pool_kind(pool).await;
         }
+    }
+
+    pub async fn begin_connection_attempt(&self, connection_id: &str) -> u64 {
+        let mut attempts = self.connection_attempts.write().await;
+        let next = attempts.get(connection_id).copied().unwrap_or(0).wrapping_add(1);
+        attempts.insert(connection_id.to_string(), next);
+        next
+    }
+
+    pub async fn supersede_connection_attempt(&self, connection_id: &str) {
+        self.begin_connection_attempt(connection_id).await;
+    }
+
+    async fn connection_attempt_is_current(&self, connection_id: &str, attempt: u64) -> bool {
+        self.connection_attempts.read().await.get(connection_id).copied() == Some(attempt)
+    }
+
+    async fn ensure_current_connection_attempt(&self, connection_id: &str, attempt: Option<u64>) -> Result<(), String> {
+        let Some(attempt) = attempt else {
+            return Ok(());
+        };
+        if self.connection_attempt_is_current(connection_id, attempt).await {
+            Ok(())
+        } else {
+            Err("Connection attempt was superseded by a newer attempt".to_string())
+        }
+    }
+
+    pub async fn insert_connection_pool_for_attempt(
+        &self,
+        connection_id: &str,
+        attempt: u64,
+        pool_key: String,
+        pool: PoolKind,
+        config: &ConnectionConfig,
+    ) -> Result<(), String> {
+        if let Err(err) = self.ensure_current_connection_attempt(connection_id, Some(attempt)).await {
+            close_pool_kind(pool).await;
+            return Err(err);
+        }
+        self.insert_connection_pool(pool_key, pool, config).await;
+        Ok(())
     }
 
     async fn start_keepalive_task(&self, pool_key: &str, pool: &PoolKind, config: &ConnectionConfig) {
@@ -533,11 +581,30 @@ impl AppState {
         self.get_or_create_pool_for_session(connection_id, database, None).await
     }
 
+    pub async fn get_or_create_pool_for_connection_attempt(
+        &self,
+        connection_id: &str,
+        database: Option<&str>,
+        attempt: u64,
+    ) -> Result<String, String> {
+        self.get_or_create_pool_for_session_inner(connection_id, database, None, Some(attempt)).await
+    }
+
     pub async fn get_or_create_pool_for_session(
         &self,
         connection_id: &str,
         database: Option<&str>,
         client_session_id: Option<&str>,
+    ) -> Result<String, String> {
+        self.get_or_create_pool_for_session_inner(connection_id, database, client_session_id, None).await
+    }
+
+    async fn get_or_create_pool_for_session_inner(
+        &self,
+        connection_id: &str,
+        database: Option<&str>,
+        client_session_id: Option<&str>,
+        connection_attempt: Option<u64>,
     ) -> Result<String, String> {
         let db_type = {
             let configs = self.configs.read().await;
@@ -570,7 +637,7 @@ impl AppState {
         let url = connection_url_for_endpoint(&db_config, &host, port);
         let connect_timeout = std::time::Duration::from_secs(db_config.effective_connect_timeout_secs());
         let idle_timeout = std::time::Duration::from_secs(db_config.idle_timeout_secs);
-        let mysql_pool_max_connections = if normalize_client_session_id(client_session_id).is_some() { 1 } else { 3 };
+        let mysql_pool_max_connections = mysql_pool_max_connections_for_session(client_session_id);
         let pool = match db_config.db_type {
             DatabaseType::Mysql => {
                 let (pool, mode) = connect_mysql_metadata_pool(
@@ -689,6 +756,7 @@ impl AppState {
                                 if self.connections.read().await.contains_key(&pool_key) {
                                     return Ok(pool_key);
                                 }
+                                self.ensure_current_connection_attempt(connection_id, connection_attempt).await?;
                                 self.insert_connection_pool(pool_key.clone(), PoolKind::MongoDb(client), &db_config)
                                     .await;
                                 return Ok(pool_key);
@@ -780,6 +848,12 @@ impl AppState {
                 )?;
                 db::influxdb_driver::test_connection(&client, connect_timeout).await?;
                 PoolKind::InfluxDb(client)
+            }
+            DatabaseType::Nacos => {
+                let admin_config = self.nacos_admin_config_for_connection(connection_id, &config).await?;
+                let adapter = self.nacos_registry.build_transient_config(admin_config).await?;
+                adapter.test_connection().await?;
+                PoolKind::Nacos
             }
             agent_connection_pool_database_type!() => {
                 let connect_params =
@@ -914,6 +988,10 @@ impl AppState {
             }
         };
 
+        if let Err(err) = self.ensure_current_connection_attempt(connection_id, connection_attempt).await {
+            close_pool_kind(pool).await;
+            return Err(err);
+        }
         self.insert_connection_pool(pool_key.clone(), pool, &db_config).await;
         Ok(pool_key)
     }
@@ -1012,6 +1090,20 @@ impl AppState {
 
         let (host, port) = self.connection_host_port(connection_id, config).await?;
         Ok(mqc.with_connect_override(&host, port))
+    }
+
+    pub async fn nacos_admin_config_for_connection(
+        &self,
+        connection_id: &str,
+        config: &ConnectionConfig,
+    ) -> Result<crate::nacos::config::NacosAdminConfig, String> {
+        let nacos_config = crate::nacos::config::NacosAdminConfig::from_connection(config)?;
+        if !config.has_effective_transport_layers() {
+            return Ok(nacos_config);
+        }
+
+        let (host, port) = self.connection_host_port(connection_id, config).await?;
+        Ok(nacos_config.with_connect_override(&host, port))
     }
 
     async fn remove_stale_connection_pool(&self, pool_key: &str) -> bool {
@@ -1191,7 +1283,8 @@ impl AppState {
                 | PoolKind::DuckDb(_)
                 | PoolKind::ExternalTabular(_)
                 | PoolKind::ExternalDriver { .. }
-                | PoolKind::MessageQueue => false,
+                | PoolKind::MessageQueue
+                | PoolKind::Nacos => false,
             }
         };
 
@@ -1570,7 +1663,8 @@ impl AppState {
                 | PoolKind::DuckDb(_)
                 | PoolKind::ExternalTabular(_)
                 | PoolKind::ExternalDriver { .. }
-                | PoolKind::MessageQueue => true,
+                | PoolKind::MessageQueue
+                | PoolKind::Nacos => true,
                 PoolKind::Redis(_) => unreachable!("Redis handled separately"),
             };
             if !healthy {
@@ -1795,6 +1889,8 @@ fn connection_remote_endpoint(config: &ConnectionConfig) -> (String, u16) {
             .unwrap_or_else(|| (config.host.clone(), config.port))
     } else if config.db_type == DatabaseType::MessageQueue {
         parse_mq_admin_host_port(config).unwrap_or_else(|| (config.host.clone(), config.port))
+    } else if config.db_type == DatabaseType::Nacos {
+        parse_nacos_server_host_port(config).unwrap_or_else(|| (config.host.clone(), config.port))
     } else {
         (config.host.clone(), config.port)
     }
@@ -1817,8 +1913,33 @@ fn parse_mq_admin_host_port(config: &ConnectionConfig) -> Option<(String, u16)> 
     Some((host, port))
 }
 
+fn parse_nacos_server_host_port(config: &ConnectionConfig) -> Option<(String, u16)> {
+    let value = config
+        .external_config
+        .as_ref()?
+        .get("serverAddr")
+        .or_else(|| config.external_config.as_ref()?.get("server_addr"))?
+        .as_str()?
+        .trim();
+    if value.is_empty() {
+        return None;
+    }
+    let url = reqwest::Url::parse(value).ok()?;
+    let host = url.host_str()?.to_string();
+    let port = url.port_or_known_default()?;
+    Some((host, port))
+}
+
 fn normalize_client_session_id(client_session_id: Option<&str>) -> Option<String> {
     client_session_id.map(str::trim).filter(|session| !session.is_empty()).map(|session| session.replace(':', "_"))
+}
+
+fn mysql_pool_max_connections_for_session(client_session_id: Option<&str>) -> usize {
+    if normalize_client_session_id(client_session_id).is_some() {
+        1
+    } else {
+        10
+    }
 }
 
 fn redis_cluster_transport_prefix(connection_id: &str) -> String {
@@ -1891,6 +2012,7 @@ fn clone_pool_kind(pool: &PoolKind) -> PoolKind {
             PoolKind::ExternalDriver { driver_id: driver_id.clone(), config: config.clone(), session: session.clone() }
         }
         PoolKind::MessageQueue => PoolKind::MessageQueue,
+        PoolKind::Nacos => PoolKind::Nacos,
         PoolKind::Redis(_) => panic!("clone_pool_kind not supported for Redis — handled separately"),
     }
 }
@@ -1940,6 +2062,7 @@ pub async fn close_pool_kind(pool: PoolKind) {
             session.shutdown().await;
         }
         PoolKind::MessageQueue => {}
+        PoolKind::Nacos => {}
     }
 }
 
@@ -2633,6 +2756,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stale_connection_attempt_cannot_replace_newer_pool() {
+        let (state, dir) = test_app_state().await;
+        let mut config = mysql_config(None);
+        config.name = "SQLite".to_string();
+        config.db_type = DatabaseType::Sqlite;
+        config.host = dir.join("current.db").to_string_lossy().to_string();
+        let old_attempt = state.begin_connection_attempt("conn").await;
+        let new_attempt = state.begin_connection_attempt("conn").await;
+        let current_pool =
+            db::sqlite::connect_path_create_if_missing(&dir.join("current.db").to_string_lossy()).await.unwrap();
+        let stale_pool =
+            db::sqlite::connect_path_create_if_missing(&dir.join("stale.db").to_string_lossy()).await.unwrap();
+
+        state
+            .insert_connection_pool_for_attempt(
+                "conn",
+                new_attempt,
+                "conn".to_string(),
+                PoolKind::Sqlite(current_pool),
+                &config,
+            )
+            .await
+            .unwrap();
+
+        let result = state
+            .insert_connection_pool_for_attempt(
+                "conn",
+                old_attempt,
+                "conn".to_string(),
+                PoolKind::Sqlite(stale_pool),
+                &config,
+            )
+            .await;
+
+        assert!(result.is_err());
+        let conns = state.connections.read().await;
+        assert!(matches!(conns.get("conn"), Some(PoolKind::Sqlite(_))));
+        assert_eq!(conns.len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
     async fn jdbc_plugin_env_uses_managed_jre_when_installed() {
         let dir = std::env::temp_dir().join(format!("dbx-core-jdbc-managed-jre-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -2960,6 +3125,13 @@ mod tests {
     }
 
     #[test]
+    fn mysql_pool_size_keeps_session_pools_single_connection() {
+        assert_eq!(super::mysql_pool_max_connections_for_session(None), 10);
+        assert_eq!(super::mysql_pool_max_connections_for_session(Some("")), 10);
+        assert_eq!(super::mysql_pool_max_connections_for_session(Some("tab-1")), 1);
+    }
+
+    #[test]
     fn prestosql_uses_external_driver_pool_not_agent_pool() {
         assert!(!super::uses_agent_connection_pool(&DatabaseType::PrestoSql));
         assert!(super::uses_agent_connection_pool(&DatabaseType::Trino));
@@ -3239,6 +3411,28 @@ mod tests {
         assert_eq!(connect_override.host, "127.0.0.1");
         assert_ne!(connect_override.port, 8443);
         state.proxy_tunnels.stop_tunnel("proxied-mq:transport:0").await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn nacos_admin_config_allows_domain_server_addr_without_transport_override() {
+        let (state, dir) = test_app_state().await;
+        let mut config = mysql_config(None);
+        config.id = "aliyun-nacos".to_string();
+        config.db_type = DatabaseType::Nacos;
+        config.host = "example.com".to_string();
+        config.port = 8848;
+        config.external_config = Some(serde_json::json!({
+            "serverAddr": "https://nacos.aliyuncs.com:8848",
+            "namespace": "public",
+            "contextPath": "/nacos",
+            "auth": { "kind": "none" }
+        }));
+
+        let nacos_config = state.nacos_admin_config_for_connection("aliyun-nacos", &config).await.unwrap();
+
+        assert_eq!(nacos_config.server_addr, "https://nacos.aliyuncs.com:8848");
+        assert!(nacos_config.connect_override.is_none());
         let _ = std::fs::remove_dir_all(dir);
     }
 

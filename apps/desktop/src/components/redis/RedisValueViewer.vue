@@ -17,6 +17,7 @@ import { useTheme } from "@/composables/useTheme";
 import { useEditorFontFamilyStyle } from "@/composables/useEditorFontFamilyStyle";
 import { createRedisShikiJsonHighlighter, type RedisJsonHighlighter } from "@/lib/redisJsonHighlighter";
 import { copyToClipboard } from "@/lib/clipboard";
+import { formatTtl } from "@/lib/ttlFormat";
 import { canEditRedisMemberDetail, clampRedisMemberDetailSheetWidth, formatRedisMemberDetail, getRedisMemberSelectionKey } from "@/lib/redisValuePresentation";
 
 const { t } = useI18n();
@@ -182,12 +183,13 @@ const isBinaryStringValue = computed(() => data.value?.key_type === "string" && 
 const hasMore = computed(() => scanCursor.value != null && scanCursor.value > 0);
 const metadataSizeLabel = computed(() => {
   const metadata = props.metadata;
-  if (!metadata || metadata.size <= 0) return "";
+  const size = metadata?.size ?? 0;
+  if (!metadata || size <= 0) return "";
   if (metadata.key_type === "string") {
-    if (metadata.size >= 1024) return `${(metadata.size / 1024).toFixed(1)} KB`;
-    return `${metadata.size} B`;
+    if (size >= 1024) return `${(size / 1024).toFixed(1)} KB`;
+    return `${size} B`;
   }
-  return String(metadata.size);
+  return String(size);
 });
 
 function collectionCountLabel(kind: "items" | "fields" | "members", loaded: number, total?: number | null) {
@@ -782,7 +784,7 @@ onBeforeUnmount(() => {
           <Badge variant="secondary" class="dbx-editor-font-family text-xs uppercase">{{ data.key_type }}</Badge>
           <Badge v-if="metadataSizeLabel" variant="outline" class="text-xs text-muted-foreground"> {{ t("redis.columnSize") }}: {{ metadataSizeLabel }} </Badge>
           <template v-if="!editingTtl">
-            <Badge v-if="data.ttl > 0" variant="outline" class="text-xs cursor-pointer text-muted-foreground hover:bg-accent" @click="startEditTtl">TTL: {{ data.ttl }}s</Badge>
+            <Badge v-if="data.ttl > 0" variant="outline" class="text-xs cursor-pointer text-muted-foreground hover:bg-accent" @click="startEditTtl">TTL: {{ formatTtl(data.ttl, t) }}</Badge>
             <Badge v-else-if="data.ttl === -1" variant="outline" class="text-xs cursor-pointer text-muted-foreground hover:bg-accent" @click="startEditTtl">{{ t("redis.noExpiry") }}</Badge>
           </template>
           <div v-else class="flex items-center gap-1">

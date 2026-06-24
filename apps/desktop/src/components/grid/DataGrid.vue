@@ -87,7 +87,7 @@ import type { BuildSingleColumnAlterSqlOptions } from "@/lib/tableStructureEdito
 import { buildTableSelectSql, quoteTableIdentifier } from "@/lib/tableSelectSql";
 import { uuid } from "@/lib/utils";
 import { resolveHeaderColumnType } from "@/lib/dataGridColumnType";
-import { canEditExistingTableRows, canUseKeylessRowPredicate, hiveTablePropertiesIndicateTransactional, isHiddenGridColumn, isTdengineExistingRowReadonlyColumn, usesSyntheticRowIdKey } from "@/lib/tableEditing";
+import { canEditExistingTableRows, canUseKeylessRowPredicate, hiveTablePropertiesIndicateTransactional, isClickHouseExistingRowReadonlyColumn, isHiddenGridColumn, isTdengineExistingRowReadonlyColumn, usesSyntheticRowIdKey } from "@/lib/tableEditing";
 import { buildDataGridContextFilterCondition, buildDataGridCountSql, buildHiveTablePropertiesSql, type DataGridContextFilterMode } from "@/lib/dataGridSql";
 import {
   buildVisibleTransposeRows,
@@ -137,16 +137,19 @@ import { useDataGridEditor } from "@/composables/useDataGridEditor";
 import { useSqlHighlighter } from "@/composables/useSqlHighlighter";
 import { useCellDetailEditor, type UseCellDetailEditorReturn } from "@/composables/useCellDetailEditor";
 import { useTheme } from "@/composables/useTheme";
+import { useConnectionStore } from "@/stores/connectionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import type { DataGridSortDirection } from "@/lib/dataGridSort";
 import { getTableMetadataCapabilities } from "@/lib/tableMetadataCapabilities";
 import { forgetDataGridConditionHistory, loadDataGridConditionHistory, rememberDataGridConditionHistory } from "@/lib/dataGridConditionHistory";
 import { caretPositionInsideInsertedSqlSingleQuotes, insertedSqlSingleQuoteAtCaret } from "@/lib/sqlQuoteCaret";
+import { effectiveDatabaseTypeForConnection } from "@/lib/jdbcDialect";
 
 const SqlPreviewPanel = defineAsyncComponent(() => import("@/components/editor/SqlPreviewPanel.vue"));
 
 const { t } = useI18n();
 const slots = useSlots();
+const connectionStore = useConnectionStore();
 const settingsStore = useSettingsStore();
 const { isDark } = useTheme();
 const { toast } = useToast();
@@ -285,6 +288,7 @@ const columnTypeMap = computed(() => {
   }
   return map;
 });
+const resolvedDatabaseType = computed(() => props.databaseType ?? effectiveDatabaseTypeForConnection(connectionStore.getConfig(props.connectionId ?? "")));
 
 const columnCommentMap = computed(() => {
   const map = new Map<string, string>();
@@ -933,7 +937,7 @@ async function applyTypedLocalFilterValue() {
   const columnName = props.result.columns[draft.columnIndex];
   if (!columnName) return;
   const condition = await buildColumnValueFilterCondition({
-    databaseType: props.databaseType,
+    databaseType: resolvedDatabaseType.value,
     columnName,
     columnInfo: props.tableMeta?.columns.find((column) => column.name === columnName),
     rawValue: localFilterTypedValue.value,
@@ -978,6 +982,34 @@ function cachedStructuredFilterState(): StructuredFilterCacheState | undefined {
   return cached?.scopeKey === structuredFilterScopeKey.value ? cached : undefined;
 }
 
+async function buildStructuredWhereFromRules(rules: StructuredFilterRule[]): Promise<string> {
+  const rulesWithConditions = (
+    await Promise.all(
+      rules.map(async (rule) => {
+        if (!rule.columnName) return { rule, condition: null };
+        if (filterModeNeedsValue(rule.mode) && !rule.rawValue.trim()) return { rule, condition: null };
+        const columnInfo = filterBuilderColumns.value.find((column) => column.name === rule.columnName);
+        return {
+          rule,
+          condition:
+            (await buildDataGridContextFilterCondition({
+              databaseType: resolvedDatabaseType.value,
+              columnName: rule.columnName,
+              columnInfo,
+              mode: rule.mode,
+              value: filterModeNeedsValue(rule.mode) ? parseFilterValue(rule.rawValue, columnInfo) : null,
+            })) ?? null,
+        };
+      }),
+    )
+  ).filter((item): item is { rule: StructuredFilterRule; condition: string } => !!item.condition);
+
+  return buildGroupedWhere(
+    rulesWithConditions.map((item) => item.condition),
+    rulesWithConditions.map((item) => item.rule),
+  );
+}
+
 function persistStructuredFilterState() {
   structuredFilterStateCache.set(structuredFilterCacheKey.value, {
     scopeKey: structuredFilterScopeKey.value,
@@ -990,10 +1022,16 @@ function persistStructuredFilterState() {
 function loadStructuredFilterStateForScope() {
   const cached = cachedStructuredFilterState();
   if (cached) {
+    const cacheKey = structuredFilterCacheKey.value;
+    const scopeKey = structuredFilterScopeKey.value;
     structuredFilterRules.value = cloneStructuredFilterRules(cached.rules);
-    appliedStructuredWhereInput.value = cached.appliedWhereInput;
     whereFilterInput.value = cached.manualWhereInput;
-    nextTick(() => emit("update:whereInput", currentWhereInput() ?? ""));
+    appliedStructuredWhereInput.value = "";
+    void buildStructuredWhereFromRules(structuredFilterRules.value).then((whereInput) => {
+      if (structuredFilterCacheKey.value !== cacheKey || structuredFilterScopeKey.value !== scopeKey) return;
+      appliedStructuredWhereInput.value = whereInput;
+      nextTick(() => emit("update:whereInput", currentWhereInput() ?? ""));
+    });
     return;
   }
   appliedStructuredWhereInput.value = "";
@@ -1077,31 +1115,7 @@ function buildGroupedWhere(conditions: string[], rules: StructuredFilterRule[]):
 
 async function applyStructuredFilters() {
   if (!canUseWhereSearch.value) return;
-  const rulesWithConditions = (
-    await Promise.all(
-      structuredFilterRules.value.map(async (rule) => {
-        if (!rule.columnName) return { rule, condition: null };
-        if (filterModeNeedsValue(rule.mode) && !rule.rawValue.trim()) return { rule, condition: null };
-        const columnInfo = filterBuilderColumns.value.find((column) => column.name === rule.columnName);
-        return {
-          rule,
-          condition:
-            (await buildDataGridContextFilterCondition({
-              databaseType: props.databaseType,
-              columnName: rule.columnName,
-              columnInfo,
-              mode: rule.mode,
-              value: filterModeNeedsValue(rule.mode) ? parseFilterValue(rule.rawValue, columnInfo) : null,
-            })) ?? null,
-        };
-      }),
-    )
-  ).filter((item): item is { rule: StructuredFilterRule; condition: string } => !!item.condition);
-
-  appliedStructuredWhereInput.value = buildGroupedWhere(
-    rulesWithConditions.map((item) => item.condition),
-    rulesWithConditions.map((item) => item.rule),
-  );
+  appliedStructuredWhereInput.value = await buildStructuredWhereFromRules(structuredFilterRules.value);
   filterBuilderOpen.value = false;
   await applyWhereFilter();
 }
@@ -2784,6 +2798,8 @@ function canEditCellItem(item: RowItem | undefined, columnIndex: number): boolea
   if (!canEditRowItem(item) || !canEditColumn(columnIndex)) return false;
   if (!item?.isNew) {
     const column = props.result.columns[columnIndex] ?? "";
+    const sourceColumn = props.sourceColumns?.[columnIndex] ?? column;
+    if (isClickHouseExistingRowReadonlyColumn(props.databaseType, sourceColumn, props.tableMeta?.primaryKeys ?? [], props.tableMeta?.columns ?? [])) return false;
     if (isTdengineExistingRowReadonlyColumn(props.databaseType, column, props.tableMeta?.columns ?? [])) return false;
   }
   return true;
@@ -3466,7 +3482,7 @@ async function prefetchDetailSqlCondition() {
 
   try {
     const condition = await buildDataGridContextFilterCondition({
-      databaseType: props.databaseType,
+      databaseType: resolvedDatabaseType.value,
       columnName: detail.column,
       columnInfo: props.tableMeta?.columns.find((column) => column.name === detail.column),
       mode: "equals",
@@ -3755,7 +3771,7 @@ async function contextFilterCondition(mode: FilterMode): Promise<string | null> 
   if (!contextColumn.value) return null;
   return (
     (await buildDataGridContextFilterCondition({
-      databaseType: props.databaseType,
+      databaseType: resolvedDatabaseType.value,
       columnName: contextColumn.value,
       columnInfo: props.tableMeta?.columns.find((column) => column.name === contextColumn.value),
       mode,
@@ -3813,7 +3829,7 @@ async function applyOrderBySearch() {
     const tableMeta = await waitForTableMeta();
     if (!tableMeta) return;
     const sql = await buildTableSelectSql({
-      databaseType: props.databaseType,
+      databaseType: resolvedDatabaseType.value,
       schema: tableMeta.schema,
       tableName: tableMeta.tableName,
       columns: tableMeta.columns.map((column) => column.name),
@@ -3821,7 +3837,7 @@ async function applyOrderBySearch() {
       orderBy: orderByClause,
       limit: pageSize.value,
       whereInput: currentWhereInput(),
-      includeRowId: usesSyntheticRowIdKey(props.databaseType, tableMeta.primaryKeys),
+      includeRowId: usesSyntheticRowIdKey(resolvedDatabaseType.value, tableMeta.primaryKeys),
     });
     await props.onExecuteSql(sql);
   } catch (e: any) {
@@ -3843,7 +3859,7 @@ async function applyWhereFilter() {
     const tableMeta = await waitForTableMeta();
     if (!tableMeta) return;
     const sql = await buildTableSelectSql({
-      databaseType: props.databaseType,
+      databaseType: resolvedDatabaseType.value,
       schema: tableMeta.schema,
       tableName: tableMeta.tableName,
       columns: tableMeta.columns.map((column) => column.name),
@@ -3851,7 +3867,7 @@ async function applyWhereFilter() {
       orderBy: orderByInput.value.trim() || (sortCol.value ? `${queryColumnRef(sortCol.value)} ${sortDir.value.toUpperCase()}` : undefined),
       limit: pageSize.value,
       whereInput,
-      includeRowId: usesSyntheticRowIdKey(props.databaseType, tableMeta.primaryKeys),
+      includeRowId: usesSyntheticRowIdKey(resolvedDatabaseType.value, tableMeta.primaryKeys),
     });
     await props.onExecuteSql(sql);
   } catch (e: any) {
