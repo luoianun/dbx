@@ -4182,12 +4182,6 @@ watch(
   { flush: "post" },
 );
 
-function toggleDataGridRenderMode() {
-  settingsStore.updateEditorSettings({
-    dataGridRenderMode: dataGridRenderMode.value === "canvas" ? "dom" : "canvas",
-  });
-}
-
 function canvasScrollerElement(): HTMLElement | null {
   const scroller = scrollerRef.value;
   if (!scroller) return null;
@@ -7192,15 +7186,6 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">{{ t("grid.refresh") }} ({{ shortcutMod }}+R)</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger as-child>
-                  <Button variant="ghost" size="sm" :class="['data-grid-topbar-action-button h-5 shrink-0 text-xs px-1.5', compactDataGridToolbar ? 'data-grid-topbar-action-button--compact' : '', dataGridRenderMode === 'canvas' ? 'text-primary bg-primary/10' : '']" @click="toggleDataGridRenderMode">
-                    <SquareDashed class="data-grid-topbar-action-icon w-3 h-3" />
-                    <span class="data-grid-topbar-action-label" :class="{ 'data-grid-topbar-action-label--compact': compactDataGridToolbar }">{{ dataGridRenderMode === "canvas" ? t("grid.canvasRenderMode") : t("grid.domRenderMode") }}</span>
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" class="max-w-sm"> {{ dataGridRenderMode === "canvas" ? t("grid.canvasRenderMode") : t("grid.domRenderMode") }} · {{ t("grid.renderModeHint") }} </TooltipContent>
               </Tooltip>
               <Tooltip v-if="props.result.columns.length">
                 <TooltipTrigger as-child>

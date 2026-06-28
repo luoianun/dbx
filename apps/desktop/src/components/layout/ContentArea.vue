@@ -3,7 +3,7 @@ import { computed, ref, defineAsyncComponent, watch, nextTick, onMounted, onUnmo
 import { safeLocalStorageGet, safeLocalStorageSet } from "@/lib/safeStorage";
 import type { CSSProperties } from "vue";
 import { useI18n } from "vue-i18n";
-import { Check, Columns3, Loader2, Search, Bot, GitBranch, BarChart3, TableProperties, ChevronDown, ChevronUp, Inbox, RefreshCcw, Wrench, Toolbox, ListChecks, Database, FileUp, Download, X, Pin } from "@lucide/vue";
+import { Check, Columns3, Loader2, Search, Bot, GitBranch, BarChart3, TableProperties, ChevronDown, ChevronUp, Inbox, RefreshCcw, Wrench, Toolbox, ListChecks, Database, FileUp, Download, X, Pin, SquareDashed } from "@lucide/vue";
 import { Splitpanes, Pane } from "splitpanes";
 import "splitpanes/dist/splitpanes.css";
 import { Button } from "@/components/ui/button";
@@ -49,6 +49,7 @@ const ExplainPlanViewer = defineAsyncComponent(() => import("@/components/explai
 const QueryChart = defineAsyncComponent(() => import("@/components/chart/QueryChart.vue"));
 import { useQueryStore } from "@/stores/queryStore";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { useSettingsStore } from "@/stores/settingsStore";
 import { useToast } from "@/composables/useToast";
 import { canCancelQueryExecution, queryExecutionLabelKey } from "@/lib/queryExecutionState";
 import { databaseDisplayNameForTab, executionSummaryItems, nextExecutionSummaryView, resultGridCacheKey, resultRunItems, tabularResultItems } from "@/lib/tabPresentation";
@@ -138,6 +139,7 @@ const emit = defineEmits<{
 const { t } = useI18n();
 const queryStore = useQueryStore();
 const connectionStore = useConnectionStore();
+const settingsStore = useSettingsStore();
 const { toast } = useToast();
 const DEFAULT_QUERY_RESULTS_PANE_SIZE = 68;
 
@@ -169,6 +171,7 @@ const queryEditorRef = ref<InstanceType<typeof QueryEditor>>();
 const resultTabsScrollerRef = ref<HTMLElement | null>(null);
 const columnVisibilitySearch = ref("");
 const columnVisibilityOptions = computed(() => dataGridRef.value?.filteredColumnVisibilityOptions(columnVisibilitySearch.value) ?? []);
+const dataGridRenderMode = computed(() => settingsStore.editorSettings.dataGridRenderMode);
 const redisKeyBrowserRef = ref<SearchableBrowserHandle>();
 const etcdKeyBrowserRef = ref<SearchableBrowserHandle>();
 const zookeeperKeyBrowserRef = ref<SearchableBrowserHandle>();
@@ -186,6 +189,10 @@ function findNodeInTree(nodes: TreeNode[], id: string): TreeNode | undefined {
     }
   }
   return undefined;
+}
+
+function setDataGridCanvasRenderMode(value: boolean) {
+  settingsStore.updateEditorSettings({ dataGridRenderMode: value ? "canvas" : "dom" });
 }
 
 const activeTabDimension = computed(() => {
@@ -706,7 +713,7 @@ defineExpose({ focusSearch, refreshData, handleModRTarget, requestQueryEditorExe
                       size="icon"
                       class="h-6 w-7 shrink-0 text-foreground hover:bg-accent"
                       :class="{
-                        'bg-accent text-foreground': dataGridRef?.nullColumnsHidden || dataGridRef?.multiRowTranspose,
+                        'bg-accent text-foreground': dataGridRef?.nullColumnsHidden || dataGridRef?.multiRowTranspose || dataGridRenderMode === 'dom',
                       }"
                       :title="t('grid.viewOptions')"
                       :aria-label="t('grid.viewOptions')"
@@ -718,6 +725,16 @@ defineExpose({ focusSearch, refreshData, handleModRTarget, requestQueryEditorExe
                     <div class="border-b bg-muted/40 px-3 py-2">
                       <div class="text-xs font-semibold">{{ t("grid.viewOptions") }}</div>
                     </div>
+                    <LightTooltip :text="t('grid.renderModeHint')" side="left" :side-offset="6" :delay="0" :open-on-focus="false">
+                      <label class="flex cursor-pointer items-center justify-between gap-3 px-3 py-2 text-xs hover:bg-accent">
+                        <span class="min-w-0 flex items-center gap-1.5 font-medium">
+                          <SquareDashed class="h-3.5 w-3.5 text-muted-foreground" />
+                          {{ t("grid.canvasRenderMode") }}
+                          <span class="text-muted-foreground">/ {{ t("grid.domRenderMode") }}</span>
+                        </span>
+                        <Switch size="sm" :model-value="dataGridRenderMode === 'canvas'" :aria-label="t('grid.renderModeHint')" @update:model-value="setDataGridCanvasRenderMode" />
+                      </label>
+                    </LightTooltip>
                     <LightTooltip :text="t('grid.transposeMultiRowHint')" side="left" :side-offset="6" :delay="0" :open-on-focus="false">
                       <label class="flex cursor-pointer items-center justify-between gap-3 px-3 py-2 text-xs hover:bg-accent">
                         <span class="min-w-0 flex items-center gap-1.5 font-medium">
@@ -955,7 +972,7 @@ defineExpose({ focusSearch, refreshData, handleModRTarget, requestQueryEditorExe
                 size="icon"
                 class="h-6 w-7 shrink-0 text-foreground hover:bg-accent"
                 :class="{
-                  'bg-accent text-foreground': dataGridRef?.nullColumnsHidden || dataGridRef?.multiRowTranspose,
+                  'bg-accent text-foreground': dataGridRef?.nullColumnsHidden || dataGridRef?.multiRowTranspose || dataGridRenderMode === 'dom',
                 }"
                 :title="t('grid.viewOptions')"
                 :aria-label="t('grid.viewOptions')"
@@ -967,6 +984,16 @@ defineExpose({ focusSearch, refreshData, handleModRTarget, requestQueryEditorExe
               <div class="border-b bg-muted/40 px-3 py-2">
                 <div class="text-xs font-semibold">{{ t("grid.viewOptions") }}</div>
               </div>
+              <LightTooltip :text="t('grid.renderModeHint')" side="left" :side-offset="6" :delay="0" :open-on-focus="false">
+                <label class="flex cursor-pointer items-center justify-between gap-3 px-3 py-2 text-xs hover:bg-accent">
+                  <span class="min-w-0 flex items-center gap-1.5 font-medium">
+                    <SquareDashed class="h-3.5 w-3.5 text-muted-foreground" />
+                    {{ t("grid.canvasRenderMode") }}
+                    <span class="text-muted-foreground">/ {{ t("grid.domRenderMode") }}</span>
+                  </span>
+                  <Switch size="sm" :model-value="dataGridRenderMode === 'canvas'" :aria-label="t('grid.renderModeHint')" @update:model-value="setDataGridCanvasRenderMode" />
+                </label>
+              </LightTooltip>
               <LightTooltip :text="t('grid.transposeMultiRowHint')" side="left" :side-offset="6" :delay="0" :open-on-focus="false">
                 <label class="flex cursor-pointer items-center justify-between gap-3 px-3 py-2 text-xs hover:bg-accent">
                   <span class="min-w-0 flex items-center gap-1.5 font-medium">
