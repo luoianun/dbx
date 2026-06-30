@@ -186,11 +186,9 @@ pub fn build_agent_list(am: &AgentManager, registry: Option<&AgentRegistry>) -> 
             let installed = am.is_driver_installed(key);
             let local = local_state.installed_drivers.get(key);
             let remote = registry.and_then(|r| agent_registry_driver(r, key));
-            let requires_java_runtime = if installed {
-                am.driver_requires_java_runtime(key)
-            } else {
-                remote.is_some_and(|driver| driver.native.get(AgentManager::current_platform()).is_none())
-            };
+            let remote_requires_java_runtime = remote.is_some_and(remote_driver_requires_java_runtime);
+            let requires_java_runtime =
+                if installed { am.driver_requires_java_runtime(key) } else { remote_requires_java_runtime };
             let jre_key = remote
                 .map(|r| r.jre.clone())
                 .or_else(|| local.map(|l| l.jre.clone()))
@@ -215,7 +213,7 @@ pub fn build_agent_list(am: &AgentManager, registry: Option<&AgentRegistry>) -> 
                 },
                 requires_java_runtime,
                 jre: jre_key.clone(),
-                jre_installed: !installed || !requires_java_runtime || am.is_jre_installed(&jre_key),
+                jre_installed: !requires_java_runtime || am.is_jre_installed(&jre_key),
             }
         })
         .collect()
@@ -223,6 +221,10 @@ pub fn build_agent_list(am: &AgentManager, registry: Option<&AgentRegistry>) -> 
 
 fn driver_download_artifact(driver: &crate::agent_manager::DriverInfo) -> Option<&crate::agent_manager::ArtifactInfo> {
     driver.native.get(AgentManager::current_platform()).or(driver.jar.as_ref())
+}
+
+fn remote_driver_requires_java_runtime(driver: &crate::agent_manager::DriverInfo) -> bool {
+    driver.jar.is_some() && !driver.native.contains_key(AgentManager::current_platform())
 }
 
 fn installed_jre_version<'a>(state: &'a crate::agent_manager::AgentState, jre_key: &str) -> Option<&'a String> {
@@ -637,10 +639,13 @@ async fn download_with_progress(
     current: Option<u32>,
     total_drivers: Option<u32>,
 ) -> Result<(), String> {
+    const DOWNLOAD_ATTEMPTS: usize = 4;
+
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
     let tmp = download_temp_path(dest);
+    let tmp_source = download_source_path(&tmp);
     let cache_path = cached_download_path(am, url, total_size, cache_identity, dest);
     prune_download_cache(am).ok();
     if cached_download_is_valid(am, &cache_path, total_size) {
@@ -657,23 +662,103 @@ async fn download_with_progress(
         .timeout(std::time::Duration::from_secs(300))
         .build()
         .map_err(|err| format!("Failed to create HTTP client: {err}"))?;
-    let mut resp = crate::race_download(&client, url, r2_path, "dbx-agent-manager")
+    let mut last_err = None;
+    let mut completed = false;
+    for attempt in 1..=DOWNLOAD_ATTEMPTS {
+        let mut resume_from = std::fs::metadata(&tmp).map(|meta| meta.len()).unwrap_or(0);
+        let resume_source = std::fs::read_to_string(&tmp_source).ok().map(|value| value.trim().to_string());
+        if resume_from > 0 && resume_source.is_none() {
+            std::fs::remove_file(&tmp).ok();
+            resume_from = 0;
+        }
+        if total_size > 0 && resume_from > total_size {
+            std::fs::remove_file(&tmp).ok();
+            std::fs::remove_file(&tmp_source).ok();
+            resume_from = 0;
+        }
+        if total_size > 0 && resume_from == total_size {
+            progress(AgentProgressEvent::transfer(step, total_size, total_size).with_batch(
+                db_type,
+                current,
+                total_drivers,
+            ));
+            completed = true;
+            break;
+        }
+
+        let (mut resp, resumed, source_url) = match open_agent_download_response(
+            &client,
+            url,
+            r2_path,
+            "dbx-agent-manager",
+            resume_from,
+            total_size,
+            resume_source.as_deref(),
+        )
         .await
-        .map_err(|err| format!("Failed to download {url}: {err}"))?;
-    let content_length = resp.content_length().unwrap_or(total_size);
-    let mut file = std::fs::File::create(&tmp).map_err(|err| format!("Failed to create temp file: {err}"))?;
-    let mut downloaded = 0;
-    while let Some(chunk) = resp.chunk().await.map_err(|err| format!("Download stream error: {err}"))? {
-        std::io::Write::write_all(&mut file, &chunk).map_err(|err| format!("Failed to write chunk: {err}"))?;
-        downloaded += chunk.len() as u64;
-        progress(AgentProgressEvent::transfer(step, downloaded, content_length).with_batch(
-            db_type,
-            current,
-            total_drivers,
+        {
+            Ok(value) => value,
+            Err(err) => {
+                if resume_from > 0 {
+                    std::fs::remove_file(&tmp).ok();
+                    std::fs::remove_file(&tmp_source).ok();
+                }
+                last_err = Some(err);
+                continue;
+            }
+        };
+        let starting_size = if resumed { resume_from } else { 0 };
+        let content_length = total_size.max(starting_size + resp.content_length().unwrap_or(0));
+        let mut file = if resumed {
+            std::fs::OpenOptions::new()
+                .append(true)
+                .open(&tmp)
+                .map_err(|err| format!("Failed to open temp file for resume: {err}"))?
+        } else {
+            std::fs::File::create(&tmp).map_err(|err| format!("Failed to create temp file: {err}"))?
+        };
+        std::fs::write(&tmp_source, &source_url).map_err(|err| format!("Failed to write download source: {err}"))?;
+        let mut downloaded = starting_size;
+        let transfer_result = async {
+            while let Some(chunk) = resp.chunk().await.map_err(|err| format!("Download stream error: {err}"))? {
+                std::io::Write::write_all(&mut file, &chunk).map_err(|err| format!("Failed to write chunk: {err}"))?;
+                downloaded += chunk.len() as u64;
+                progress(AgentProgressEvent::transfer(step, downloaded, content_length).with_batch(
+                    db_type,
+                    current,
+                    total_drivers,
+                ));
+            }
+            std::io::Write::flush(&mut file).map_err(|err| format!("Failed to flush temp file: {err}"))
+        }
+        .await;
+        drop(file);
+
+        if let Err(err) = transfer_result {
+            last_err = Some(format!("{err} (attempt {attempt}/{DOWNLOAD_ATTEMPTS}, source {source_url})"));
+            continue;
+        }
+
+        let actual_size = std::fs::metadata(&tmp).map(|meta| meta.len()).unwrap_or(0);
+        if total_size == 0 || actual_size == total_size {
+            completed = true;
+            break;
+        }
+        if actual_size > total_size {
+            std::fs::remove_file(&tmp).ok();
+            std::fs::remove_file(&tmp_source).ok();
+        }
+        last_err = Some(format!(
+            "Downloaded {step} is incomplete: expected {total_size} bytes, got {actual_size} bytes (attempt {attempt}/{DOWNLOAD_ATTEMPTS}, source {source_url})"
         ));
     }
-    std::io::Write::flush(&mut file).map_err(|err| format!("Failed to flush temp file: {err}"))?;
-    drop(file);
+    if !completed {
+        let actual_size = std::fs::metadata(&tmp).map(|meta| meta.len()).unwrap_or(0);
+        return Err(last_err.unwrap_or_else(|| {
+            format!("Downloaded {step} is incomplete: expected {total_size} bytes, got {actual_size} bytes")
+        }));
+    }
+    std::fs::remove_file(&tmp_source).ok();
     if let Some(parent) = cache_path.parent() {
         if let Err(err) = std::fs::create_dir_all(parent) {
             log::warn!("Failed to create agent download cache directory: {err}");
@@ -682,6 +767,74 @@ async fn download_with_progress(
         }
     }
     replace_download(&tmp, dest)
+}
+
+async fn open_agent_download_response(
+    client: &reqwest::Client,
+    github_url: &str,
+    r2_path: &str,
+    user_agent: &str,
+    resume_from: u64,
+    expected_size: u64,
+    resume_source: Option<&str>,
+) -> Result<(reqwest::Response, bool, String), String> {
+    let mut errors = Vec::new();
+    for candidate_url in crate::download_candidate_urls(github_url, r2_path) {
+        if resume_from > 0 && resume_source.is_some_and(|source| source != candidate_url) {
+            continue;
+        }
+        let mut request = client
+            .get(&candidate_url)
+            .header(reqwest::header::USER_AGENT, user_agent)
+            .header(reqwest::header::ACCEPT_ENCODING, "identity");
+        if resume_from > 0 {
+            request = request.header(reqwest::header::RANGE, format!("bytes={resume_from}-"));
+        }
+        let resp = match request.send().await {
+            Ok(resp) => resp,
+            Err(err) => {
+                errors.push(format!("{candidate_url}: {err}"));
+                continue;
+            }
+        };
+        let status = resp.status();
+        if expected_size > 0 {
+            let response_size = response_total_size(&resp, resume_from);
+            if response_size != Some(expected_size) {
+                let found = response_size.map_or_else(|| "unknown".to_string(), |size| size.to_string());
+                errors.push(format!(
+                    "{candidate_url}: artifact size mismatch, expected {expected_size} bytes, got {found} bytes"
+                ));
+                continue;
+            }
+        }
+        if resume_from > 0 && status == reqwest::StatusCode::PARTIAL_CONTENT {
+            return Ok((resp, true, candidate_url));
+        }
+        if status.is_success() {
+            return match resp.error_for_status() {
+                Ok(resp) => Ok((resp, false, candidate_url)),
+                Err(err) => Err(format!("{candidate_url}: {err}")),
+            };
+        }
+        errors.push(format!("{candidate_url}: HTTP {status}"));
+    }
+    Err(format!("Failed to download artifact: {}", errors.join("; ")))
+}
+
+fn response_total_size(resp: &reqwest::Response, resume_from: u64) -> Option<u64> {
+    if resp.status() == reqwest::StatusCode::PARTIAL_CONTENT {
+        return resp
+            .headers()
+            .get(reqwest::header::CONTENT_RANGE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(content_range_total_size);
+    }
+    resp.content_length().map(|size| size + resume_from)
+}
+
+fn content_range_total_size(value: &str) -> Option<u64> {
+    value.rsplit('/').next()?.parse().ok()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -839,6 +992,16 @@ pub fn is_app_version_compatible(min_app_version: &str, current_version: &str) -
 pub fn download_temp_path(dest: &std::path::Path) -> std::path::PathBuf {
     let file_name = dest.file_name().and_then(|name| name.to_str()).unwrap_or("download");
     dest.with_file_name(format!("{file_name}.download"))
+}
+
+fn download_source_path(tmp: &std::path::Path) -> std::path::PathBuf {
+    tmp.with_extension(format!(
+        "{}source",
+        tmp.extension()
+            .and_then(|extension| extension.to_str())
+            .map(|extension| format!("{extension}."))
+            .unwrap_or_default()
+    ))
 }
 
 pub fn replace_download(tmp: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {

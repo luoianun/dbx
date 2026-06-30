@@ -89,6 +89,7 @@ pub async fn race_download(
             client
                 .get(&url)
                 .header(reqwest::header::USER_AGENT, ua)
+                .header(reqwest::header::ACCEPT_ENCODING, "identity")
                 .send()
                 .await
                 .and_then(|r| r.error_for_status())

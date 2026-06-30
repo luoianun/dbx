@@ -249,6 +249,18 @@ fn agent_list_keeps_jre_requirement_for_installed_jar_when_registry_has_native()
 }
 
 #[test]
+fn agent_list_reports_missing_jre_for_uninstalled_java_drivers() {
+    let manager = test_manager("uninstalled-java-driver-missing-jre");
+    let registry = registry_with_jre_driver("dameng", "0.2.0", DEFAULT_JRE_KEY, "21.0.11");
+
+    let agents = build_agent_list(&manager, Some(&registry));
+    let dameng = agents.iter().find(|agent| agent.db_type == "dameng").unwrap();
+
+    assert!(!dameng.installed);
+    assert!(!dameng.jre_installed);
+}
+
+#[test]
 fn agent_list_uses_legacy_default_jre_version_when_checking_updates() {
     let manager = test_manager("legacy-jre-version");
     let jar_path = manager.driver_jar_path("dameng");
