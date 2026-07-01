@@ -156,6 +156,8 @@ const completionTranslations = computed(() => ({
   functionDescriptions: Object.fromEntries(SQL_FUNCTION_NAMES.map((name) => [name, t(`editor.completion.functionDescriptions.${name}`)])) as Record<string, string>,
 }));
 const MAX_COMPLETION_TABLES = 200;
+const PRESTO_ON_DEMAND_TABLE_COMPLETION_MIN_PREFIX = 2;
+const PRESTO_ON_DEMAND_TABLE_COMPLETION_LIMIT = 20;
 const MAX_JOIN_FK_PREFETCH_TABLES = 24;
 const MAX_SEMANTIC_DIAGNOSTIC_COLUMN_TABLES = 4;
 const liveFontSize = ref(settingsStore.editorSettings.fontSize);
@@ -715,6 +717,12 @@ function usesLocalOnlyCompletionMetadata(): boolean {
 
 function usesOnDemandOnlyCompletionColumns(): boolean {
   return usesOnDemandOnlyEditorColumnMetadata(props.databaseType);
+}
+
+function allowsOnDemandQualifiedTableCompletion(prefix: string): boolean {
+  if (!usesLocalOnlyCompletionMetadata()) return false;
+  if (props.databaseType !== "prestosql" && props.databaseType !== "trino") return false;
+  return prefix.trim().length >= PRESTO_ON_DEMAND_TABLE_COMPLETION_MIN_PREFIX;
 }
 
 function completionMetadataTarget(table: { name: string; schema?: string | null }): { database: string; schema?: string } | null {
@@ -1814,9 +1822,12 @@ async function performAsyncCompletionWithResult(epoch: number, completionContext
   // If qualifier didn't match any table names, try it as a schema name
   let qualifierIsSchema = false;
   if (completionContext.qualifier && !qualifierDatabase && !isReferencedTableQualifier(completionContext) && tables.length === 0 && (completionContext.suggestTables || completionContext.exclusiveColumnSuggestions)) {
-    const schemaTables = localOnlyMetadata
-      ? connectionStore.lookupLocalCompletionTables(props.connectionId!, props.database!, completionContext.prefix, MAX_COMPLETION_TABLES, completionContext.qualifier)
-      : await listCompletionTablesWithLatencyBudget(props.connectionId!, props.database!, completionContext.prefix, MAX_COMPLETION_TABLES, completionContext.qualifier);
+    let schemaTables = connectionStore.lookupLocalCompletionTables(props.connectionId!, props.database!, completionContext.prefix, MAX_COMPLETION_TABLES, completionContext.qualifier);
+    if (!localOnlyMetadata) {
+      schemaTables = await listCompletionTablesWithLatencyBudget(props.connectionId!, props.database!, completionContext.prefix, MAX_COMPLETION_TABLES, completionContext.qualifier);
+    } else if (schemaTables.length === 0 && allowsOnDemandQualifiedTableCompletion(completionContext.prefix)) {
+      schemaTables = await listCompletionTablesWithLatencyBudget(props.connectionId!, props.database!, completionContext.prefix, PRESTO_ON_DEMAND_TABLE_COMPLETION_LIMIT, completionContext.qualifier);
+    }
     if (schemaTables.length > 0) {
       tables = schemaTables;
       qualifierIsSchema = true;
@@ -1868,7 +1879,8 @@ async function performAsyncCompletionWithResult(epoch: number, completionContext
     }
   }
 
-  const shouldFetchColumnsForCompletion = !onDemandOnlyColumns || completionContext.suggestColumns || completionContext.exclusiveColumnSuggestions || !!completionContext.insertTable;
+  const isTableNameCompletionContext = completionContext.suggestTables || completionContext.exclusiveTableSuggestions;
+  const shouldFetchColumnsForCompletion = !onDemandOnlyColumns || ((completionContext.suggestColumns || completionContext.exclusiveColumnSuggestions) && !isTableNameCompletionContext) || !!completionContext.insertTable;
   if (shouldFetchColumnsForCompletion) {
     await Promise.all(
       refs.map(async (refTable) => {
